@@ -2,11 +2,10 @@
 // Copyright (c) 2017 Uber Technologies, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package dependencystore
+package depstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -16,23 +15,18 @@ import (
 	"github.com/jaegertracing/jaeger/internal/metrics"
 	"github.com/jaegertracing/jaeger/internal/storage/cassandra"
 	casmetrics "github.com/jaegertracing/jaeger/internal/storage/cassandra/metrics"
+	storeapi "github.com/jaegertracing/jaeger/internal/storage/v2/api/depstore"
 )
 
-// Version determines which version of the dependencies table to use.
-type Version int
-
-// IsValid returns true if the Version is a valid one.
-func (i Version) IsValid() bool {
-	return i >= 0 && i < versionEnumEnd
-}
+// version determines which version of the dependencies table to use.
+type version int
 
 const (
-	// V1 is used when the dependency table is SASI indexed.
-	V1 Version = iota
+	// v1 is used when the dependency table is SASI indexed.
+	v1 version = iota
 
-	// V2 is used when the dependency table is NOT SASI indexed.
-	V2
-	versionEnumEnd
+	// v2 is used when the dependency table is NOT SASI indexed.
+	v2
 
 	depsInsertStmtV1 = "INSERT INTO dependencies(ts, ts_index, dependencies) VALUES (?, ?, ?)"
 	depsInsertStmtV2 = "INSERT INTO dependencies_v2(ts, ts_bucket, dependencies) VALUES (?, ?, ?)"
@@ -43,39 +37,42 @@ const (
 	tsBucket = 24 * time.Hour
 )
 
-var errInvalidVersion = errors.New("invalid version")
+var (
+	_ storeapi.Reader = (*DependencyStore)(nil)
+	_ storeapi.Writer = (*DependencyStore)(nil)
+)
 
-// DependencyStore handles all queries and insertions to Cassandra dependencies
+// DependencyStore handles all queries and insertions to Cassandra dependencies.
 type DependencyStore struct {
 	session                  cassandra.Session
 	dependenciesTableMetrics *casmetrics.Table
 	logger                   *zap.Logger
-	version                  Version
+	version                  version
 }
 
-// NewDependencyStore returns a DependencyStore
+// NewDependencyStore returns a DependencyStore.
 func NewDependencyStore(
 	session cassandra.Session,
 	metricsFactory metrics.Factory,
 	logger *zap.Logger,
-	version Version,
-) (*DependencyStore, error) {
-	if !version.IsValid() {
-		return nil, errInvalidVersion
-	}
+) *DependencyStore {
 	return &DependencyStore{
 		session:                  session,
 		dependenciesTableMetrics: casmetrics.NewTable(metricsFactory, "dependencies"),
 		logger:                   logger,
-		version:                  version,
-	}, nil
+		version:                  getDependencyVersion(session),
+	}
 }
 
-// WriteDependencies implements dependencystore.Writer#WriteDependencies.
-func (s *DependencyStore) WriteDependencies(ts time.Time, dependencies []model.DependencyLink) error {
-	deps := make([]Dependency, len(dependencies))
+// WriteDependencies writes dependencies to Cassandra.
+func (s *DependencyStore) WriteDependencies(
+	_ context.Context,
+	ts time.Time,
+	dependencies []model.DependencyLink,
+) error {
+	deps := make([]dependency, len(dependencies))
 	for i, d := range dependencies {
-		deps[i] = Dependency{
+		deps[i] = dependency{
 			Parent: d.Parent,
 			Child:  d.Child,
 			//nolint:gosec // G115
@@ -86,9 +83,9 @@ func (s *DependencyStore) WriteDependencies(ts time.Time, dependencies []model.D
 
 	var query cassandra.Query
 	switch s.version {
-	case V1:
+	case v1:
 		query = s.session.Query(depsInsertStmtV1, ts, ts, deps)
-	case V2:
+	case v2:
 		query = s.session.Query(depsInsertStmtV2, ts, ts.Truncate(tsBucket), deps)
 	default:
 		return fmt.Errorf("unsupported schema version: %v", s.version)
@@ -96,22 +93,26 @@ func (s *DependencyStore) WriteDependencies(ts time.Time, dependencies []model.D
 	return s.dependenciesTableMetrics.Exec(query, s.logger)
 }
 
-// GetDependencies returns all interservice dependencies
-func (s *DependencyStore) GetDependencies(_ context.Context, endTs time.Time, lookback time.Duration) ([]model.DependencyLink, error) {
-	startTs := endTs.Add(-1 * lookback)
+// GetDependencies returns all interservice dependencies in the requested time range.
+func (s *DependencyStore) GetDependencies(
+	_ context.Context,
+	queryParams storeapi.QueryParameters,
+) ([]model.DependencyLink, error) {
+	startTime := queryParams.StartTime
+	endTime := queryParams.EndTime
 	var query cassandra.Query
 	switch s.version {
-	case V1:
-		query = s.session.Query(depsSelectStmtV1, startTs, endTs)
-	case V2:
-		query = s.session.Query(depsSelectStmtV2, getBuckets(startTs, endTs), startTs, endTs)
+	case v1:
+		query = s.session.Query(depsSelectStmtV1, startTime, endTime)
+	case v2:
+		query = s.session.Query(depsSelectStmtV2, getBuckets(startTime, endTime), startTime, endTime)
 	default:
 		return nil, fmt.Errorf("unsupported schema version: %v", s.version)
 	}
 	iter := query.Consistency(cassandra.One).Iter()
 
-	var mDependency []model.DependencyLink
-	var dependencies []Dependency
+	var result []model.DependencyLink
+	var dependencies []dependency
 	var ts time.Time
 	for iter.Scan(&ts, &dependencies) {
 		for _, dependency := range dependencies {
@@ -122,22 +123,27 @@ func (s *DependencyStore) GetDependencies(_ context.Context, endTs time.Time, lo
 				CallCount: uint64(dependency.CallCount),
 				Source:    dependency.Source,
 			}.ApplyDefaults()
-			mDependency = append(mDependency, dl)
+			result = append(result, dl)
 		}
 	}
 
 	if err := iter.Close(); err != nil {
-		s.logger.Error("Failure to read Dependencies", zap.Time("endTs", endTs), zap.Duration("lookback", lookback), zap.Error(err))
+		s.logger.Error(
+			"Failure to read Dependencies",
+			zap.Time("endTs", endTime),
+			zap.Duration("lookback", endTime.Sub(startTime)),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("error reading dependencies from storage: %w", err)
 	}
-	return mDependency, nil
+	return result, nil
 }
 
-func getBuckets(startTs time.Time, endTs time.Time) []time.Time {
+func getBuckets(startTime time.Time, endTime time.Time) []time.Time {
 	// TODO: Preallocate the array using some maths and maybe use a pool? This endpoint probably isn't used enough to warrant this.
-	var tsBuckets []time.Time
-	for ts := startTs.Truncate(tsBucket); ts.Before(endTs); ts = ts.Add(tsBucket) {
-		tsBuckets = append(tsBuckets, ts)
+	var buckets []time.Time
+	for ts := startTime.Truncate(tsBucket); ts.Before(endTime); ts = ts.Add(tsBucket) {
+		buckets = append(buckets, ts)
 	}
-	return tsBuckets
+	return buckets
 }

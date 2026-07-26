@@ -19,8 +19,8 @@ import (
 	"github.com/jaegertracing/jaeger/internal/storage/v2/api/depstore"
 	"github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore"
 	"github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore/tracestoremetrics"
+	cdepstore "github.com/jaegertracing/jaeger/internal/storage/v2/cassandra/depstore"
 	ctracestore "github.com/jaegertracing/jaeger/internal/storage/v2/cassandra/tracestore"
-	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 	"github.com/jaegertracing/jaeger/internal/telemetry"
 )
 
@@ -81,11 +81,8 @@ func (f *Factory) CreateTraceWriter() (tracestore.Writer, error) {
 }
 
 func (f *Factory) CreateDependencyReader() (depstore.Reader, error) {
-	reader, err := f.v1Factory.CreateDependencyReader()
-	if err != nil {
-		return nil, err
-	}
-	return v1adapter.NewDependencyReader(reader), nil
+	session := f.v1Factory.GetSession()
+	return cdepstore.NewDependencyStore(session, f.metricsFactory, f.logger), nil
 }
 
 func (f *Factory) CreateSamplingStore(maxBuckets int) (samplingstore.Store, error) {

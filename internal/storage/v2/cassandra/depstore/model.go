@@ -2,7 +2,7 @@
 // Copyright (c) 2017 Uber Technologies, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package dependencystore
+package depstore
 
 import (
 	"fmt"
@@ -10,16 +10,16 @@ import (
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 )
 
-// Dependency is the UDT representation of a Jaeger Dependency.
-type Dependency struct {
+// dependency is the UDT representation of a Jaeger Dependency.
+type dependency struct {
 	Parent    string `cql:"parent"`
 	Child     string `cql:"child"`
 	CallCount int64  `cql:"call_count"` // always unsigned, but we cannot explicitly read uint64 from Cassandra
 	Source    string `cql:"source"`
 }
 
-// MarshalUDT handles marshalling a Dependency.
-func (d *Dependency) MarshalUDT(name string, info gocql.TypeInfo) ([]byte, error) {
+// MarshalUDT handles marshalling a dependency.
+func (d *dependency) MarshalUDT(name string, info gocql.TypeInfo) ([]byte, error) {
 	switch name {
 	case "parent":
 		return gocql.Marshal(info, d.Parent)
@@ -34,8 +34,8 @@ func (d *Dependency) MarshalUDT(name string, info gocql.TypeInfo) ([]byte, error
 	}
 }
 
-// UnmarshalUDT handles unmarshalling a Dependency.
-func (d *Dependency) UnmarshalUDT(name string, info gocql.TypeInfo, data []byte) error {
+// UnmarshalUDT handles unmarshalling a dependency.
+func (d *dependency) UnmarshalUDT(name string, info gocql.TypeInfo, data []byte) error {
 	switch name {
 	case "parent":
 		return gocql.Unmarshal(info, data, &d.Parent)

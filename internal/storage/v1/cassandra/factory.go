@@ -19,9 +19,7 @@ import (
 	gocqlw "github.com/jaegertracing/jaeger/internal/storage/cassandra/gocql"
 	caslock "github.com/jaegertracing/jaeger/internal/storage/distributedlock/cassandra"
 	"github.com/jaegertracing/jaeger/internal/storage/v1"
-	"github.com/jaegertracing/jaeger/internal/storage/v1/api/dependencystore"
 	"github.com/jaegertracing/jaeger/internal/storage/v1/api/samplingstore"
-	cdepstore "github.com/jaegertracing/jaeger/internal/storage/v1/cassandra/dependencystore"
 	csamplingstore "github.com/jaegertracing/jaeger/internal/storage/v1/cassandra/samplingstore"
 	"github.com/jaegertracing/jaeger/internal/storage/v1/cassandra/schema"
 )
@@ -117,12 +115,6 @@ func NewSession(c *config.Configuration) (cassandra.Session, error) {
 	}
 
 	return createSession(c)
-}
-
-// CreateDependencyReader creates a dependencystore.Reader.
-func (f *Factory) CreateDependencyReader() (dependencystore.Reader, error) {
-	version := cdepstore.GetDependencyVersion(f.session)
-	return cdepstore.NewDependencyStore(f.session, f.metricsFactory, f.logger, version)
 }
 
 // CreateLock implements storage.SamplingStoreFactory

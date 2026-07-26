@@ -15,10 +15,9 @@ import (
 
 	casconfig "github.com/jaegertracing/jaeger/internal/storage/cassandra/config"
 	"github.com/jaegertracing/jaeger/internal/storage/integration/capabilities"
-	"github.com/jaegertracing/jaeger/internal/storage/v1/api/dependencystore"
 	cassandrav1 "github.com/jaegertracing/jaeger/internal/storage/v1/cassandra"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/depstore"
 	"github.com/jaegertracing/jaeger/internal/storage/v2/cassandra"
-	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 	"github.com/jaegertracing/jaeger/internal/telemetry"
 	"github.com/jaegertracing/jaeger/internal/testutils"
 )
@@ -96,12 +95,9 @@ func (s *CassandraStorageIntegration) initializeDependencyReaderAndWriter(t *tes
 	require.NoError(t, err)
 	s.DependencyReader = dependencyReader
 
-	// TODO: Update this when the factory interface has CreateDependencyWriter
-	if dependencyWriter, ok := dependencyReader.(dependencystore.Writer); !ok {
-		t.Log("DependencyWriter not implemented ")
-	} else {
-		s.DependencyWriter = v1adapter.NewDependencyWriter(dependencyWriter)
-	}
+	dependencyWriter, ok := dependencyReader.(depstore.Writer)
+	require.True(t, ok, "Cassandra dependency store must implement depstore.Writer")
+	s.DependencyWriter = dependencyWriter
 }
 
 func TestCassandraStorage(t *testing.T) {

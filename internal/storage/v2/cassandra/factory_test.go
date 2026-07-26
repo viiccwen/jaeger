@@ -19,6 +19,7 @@ import (
 	"github.com/jaegertracing/jaeger/internal/storage/cassandra/config"
 	"github.com/jaegertracing/jaeger/internal/storage/cassandra/mocks"
 	"github.com/jaegertracing/jaeger/internal/storage/v1/cassandra"
+	cdepstore "github.com/jaegertracing/jaeger/internal/storage/v2/cassandra/depstore"
 	"github.com/jaegertracing/jaeger/internal/telemetry"
 )
 
@@ -80,8 +81,9 @@ func TestNewFactory(t *testing.T) {
 	_, err = f.CreateTraceReader()
 	require.NoError(t, err)
 
-	_, err = f.CreateDependencyReader()
+	dependencyReader, err := f.CreateDependencyReader()
 	require.NoError(t, err)
+	require.IsType(t, &cdepstore.DependencyStore{}, dependencyReader)
 
 	_, err = f.CreateLock()
 	require.NoError(t, err)

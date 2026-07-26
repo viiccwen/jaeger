@@ -2,7 +2,7 @@
 // Copyright (c) 2017 Uber Technologies, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package dependencystore
+package depstore
 
 import (
 	"testing"
@@ -13,7 +13,7 @@ import (
 )
 
 func TestDependencyUDT(t *testing.T) {
-	dependency := &Dependency{
+	dep := &dependency{
 		Parent:    "bi",
 		Child:     "ng",
 		CallCount: 123,
@@ -21,8 +21,8 @@ func TestDependencyUDT(t *testing.T) {
 	}
 
 	testCase := testutils.UDTTestCase{
-		Obj:     dependency,
-		New:     func() gocql.UDTUnmarshaler { return &Dependency{} },
+		Obj:     dep,
+		New:     func() gocql.UDTUnmarshaler { return &dependency{} },
 		ObjName: "Dependency",
 		Fields: []testutils.UDTField{
 			{Name: "parent", Type: gocql.TypeAscii, ValIn: []byte("bi"), Err: false},
